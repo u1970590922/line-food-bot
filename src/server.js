@@ -163,20 +163,21 @@ async function handleMessage(text, senderName, isLineWebhook) {
   }
 
   const parsed = parseOrder(trimmed);
-  if (!parsed || !parsed.items || parsed.items.length === 0) {
+  
+  // parseOrder 可能回傳單一物件或陣列（多行格式）
+  const orders = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+  
+  for (const p of orders) {
+    if (!p || !p.items || p.items.length === 0) continue;
+    const customerName = p.customerName || senderName;
+    await addItem(customerName, p.items);
+  }
+
+  if (orders.length === 0) {
     // 無法解析的訊息，靜默忽略
     return null;
   }
 
-  const customerName = parsed.customerName || senderName;
-  const before = await getState();
-  const after = await addItem(customerName, parsed.items);
-
-  if (!after) return null;
-
-  // 檢查是否為新項目（用於 debug，正式版不回覆）
-  const beforeItems = before.orders[customerName] || [];
-  const newItems = parsed.items.filter((item) => !beforeItems.includes(item));
   // 靜默記錄，不回覆（節省 LINE 免費額度）
   return null;
 }
