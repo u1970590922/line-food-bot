@@ -1,14 +1,13 @@
 /**
- * 訂單儲存模組
- * 以 JSON 檔案持久化，restart-safe。
+ * PostgreSQL 訂單儲存模組
  */
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import pg from 'pg';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+const { Pool } = pg;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
 const STATUS = Object.freeze({
   IDLE: 'idle',
@@ -16,44 +15,43 @@ const STATUS = Object.freeze({
   CLOSED: 'closed',
 });
 
-function emptyOrders() {
-  return {
-    status: STATUS.IDLE,
-    orders: {},
-    updatedAt: new Date().toISOString(),
-  };
-}
+async function ensureTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'idle',
+      orders JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
 
-async function readFileSafe() {
-  try {
-    const raw = await fs.readFile(ORDERS_FILE, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return emptyOrders();
+  const { rowCount } = await pool.query('SELECT COUNT(*) AS count FROM orders');
+  if (Number(rowCount[0].count) === 0) {
+    await pool.query(
+      `INSERT INTO orders (status, orders, updated_at) VALUES ($1, $2::jsonb, now())`,
+      [STATUS.IDLE, JSON.stringify({})]
+    );
   }
 }
 
-async function writeFileSafe(data) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const updated = { ...data, updatedAt: new Date().toISOString() };
-  await fs.writeFile(ORDERS_FILE, JSON.stringify(updated, null, 2), 'utf8');
-  return updated;
+export async function init() {
+  await ensureTables();
 }
 
-// 公開 API
 export async function startOrder() {
-  const data = emptyOrders();
-  data.status = STATUS.OPEN;
-  await writeFileSafe(data);
+  const data = { status: STATUS.OPEN, orders: {} };
+  await pool.query(
+    `UPDATE orders SET status = $1, orders = $2::jsonb, updated_at = now() WHERE id = 1`,
+    [data.status, JSON.stringify(data.orders)]
+  );
   return data;
 }
 
 export async function addItem(customerName, items) {
-  const data = await readFileSafe();
-  if (data.status !== STATUS.OPEN) return null;
+  const current = await getState();
+  if (current.status !== STATUS.OPEN) return null;
 
-  const existing = data.orders[customerName] || [];
-  // 合併，去重
+  const existing = current.orders[customerName] || [];
   const merged = [...existing];
   for (const item of items) {
     const trimmed = item.trim();
@@ -61,26 +59,42 @@ export async function addItem(customerName, items) {
       merged.push(trimmed);
     }
   }
-  data.orders[customerName] = merged;
-  await writeFileSafe(data);
-  return data;
+
+  const orders = { ...current.orders, [customerName]: merged };
+  await pool.query(
+    `UPDATE orders SET orders = $1::jsonb, updated_at = now() WHERE id = 1`,
+    [JSON.stringify(orders)]
+  );
+  return { status: STATUS.OPEN, orders };
 }
 
 export async function closeOrder() {
-  const data = await readFileSafe();
-  data.status = STATUS.CLOSED;
-  await writeFileSafe(data);
-  return data;
+  const current = await getState();
+  current.status = STATUS.CLOSED;
+  await pool.query(
+    `UPDATE orders SET status = $1, updated_at = now() WHERE id = 1`,
+    [current.status]
+  );
+  return current;
 }
 
 export async function clear() {
-  const data = emptyOrders();
-  await writeFileSafe(data);
+  const data = { status: STATUS.IDLE, orders: {} };
+  await pool.query(
+    `UPDATE orders SET status = $1, orders = $2::jsonb, updated_at = now() WHERE id = 1`,
+    [data.status, JSON.stringify(data.orders)]
+  );
   return data;
 }
 
 export async function getState() {
-  return readFileSafe();
+  const { rows } = await pool.query('SELECT status, orders FROM orders WHERE id = 1');
+  const row = rows[0];
+  return {
+    status: row.status,
+    orders: row.orders || {},
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export { STATUS };

@@ -2,7 +2,7 @@
  * LINE 點餐 Bot — Fastify Server
  */
 import Fastify from 'fastify';
-import { startOrder, addItem, closeOrder, clear, getState, STATUS } from './orderStore.js';
+import { startOrder, addItem, closeOrder, clear, getState, init, STATUS } from './orderStore.js';
 import { parseOrder } from './parser.js';
 import { formatSummary, formatHelp } from './responses.js';
 
@@ -164,7 +164,10 @@ async function handleMessage(text, senderName, isLineWebhook) {
 
   const parsed = parseOrder(trimmed);
   
-  // parseOrder 可能回傳單一物件或陣列（多行格式）
+  // DEBUG
+  console.log('[DEBUG] trimmed=', JSON.stringify(trimmed), 'parsed=', JSON.stringify(parsed));
+  
+  // parseOrder 可能回传单一物件或阵列（多行格式）
   const orders = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
   
   for (const p of orders) {
@@ -206,17 +209,14 @@ function detectCommand(text) {
 }
 
 // 啟動
+await init();
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-fastify.listen({ port: Number(PORT), host: HOST }, (err) => {
-  if (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
-  console.log(`🍱 LINE 點餐 Bot 已啟動`);
-  console.log(`   本地：http://localhost:${PORT}`);
-  console.log(`   健康檢查：http://localhost:${PORT}/health`);
-  console.log(`   測試端點：http://localhost:${PORT}/test/summary`);
-  console.log(`   發送測試：POST http://localhost:${PORT}/test/message`);
-});
+await fastify.listen({ port: Number(PORT), host: HOST });
+console.log(`🍱 LINE 點餐 Bot 已啟動`);
+console.log(`   本地：http://localhost:${PORT}`);
+console.log(`   健康檢查：http://localhost:${PORT}/health`);
+console.log(`   測試端點：http://localhost:${PORT}/test/summary`);
+console.log(`   發送測試：POST http://localhost:${PORT}/test/message`);
