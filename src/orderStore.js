@@ -7,6 +7,7 @@ const { Pool } = pg;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
 const STATUS = Object.freeze({
@@ -25,8 +26,8 @@ async function ensureTables() {
     );
   `);
 
-  const { rowCount } = await pool.query('SELECT COUNT(*) AS count FROM orders');
-  if (Number(rowCount[0].count) === 0) {
+  const result = await pool.query('SELECT COUNT(*) AS count FROM orders');
+  if (Number(result.rows[0].count) === 0) {
     await pool.query(
       `INSERT INTO orders (status, orders, updated_at) VALUES ($1, $2::jsonb, now())`,
       [STATUS.IDLE, JSON.stringify({})]
