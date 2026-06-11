@@ -4,3 +4,4 @@ data/orders.json
 .railway/
 .env.local
 *.log
+.hermes-tmp.*/
